@@ -6,5 +6,6 @@
 
     <!-- Chat Activity -->
     <color name="localBackground">#827b92</color>
+    <color name="blackBackground">#000000</color>
     <color name="remoteBackground">#484258</color>
 </resources>

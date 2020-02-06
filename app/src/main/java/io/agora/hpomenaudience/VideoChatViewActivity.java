@@ -42,25 +42,28 @@ public class VideoChatViewActivity extends AppCompatActivity {
     };
 
     private RtcEngine mRtcEngine;
-    private boolean mIsCallActive = false;
     private boolean mMuted;
-    private boolean mShowRemoteCamera = true;
     private boolean mEnableDebug = false;
     private int mRemoteCameraUid = 0;
+    private UIState mUIState;
 
     private FrameLayout mRemoteCameraContainer;
-    private RelativeLayout mRemoteShareContainer;
+    private RelativeLayout mRemoteShareContainerSplit;
+    private RelativeLayout mRemoteShareContainerFull;
     private SurfaceView mRemoteCameraView;
     private SurfaceView mRemoteShareView;
 
     private ImageView mCallBtn;
     private ImageView mMuteBtn;
-    private ImageView mDebugBtn;
     private ImageView mShowCameraBtn;
     private EditText mChannelText;
 
     // Customized logger view
     private LoggerRecyclerView mLogView;
+
+    enum UIState {
+        DISCONNECTED, CONNECTED_SPLITSCREEN, CONNECTED_FULLSCREEN;
+    }
 
     //////////////////////////////////// Life cycle events /////////////////////////////////////////
 
@@ -71,12 +74,12 @@ public class VideoChatViewActivity extends AppCompatActivity {
 
         // Initialize the UI elements.
         mRemoteCameraContainer = findViewById(R.id.remote_camera_view_container);
-        mRemoteShareContainer = findViewById(R.id.remote_share_view_container);
+        mRemoteShareContainerSplit = findViewById(R.id.remote_share_view_container_split);
+        mRemoteShareContainerFull = findViewById(R.id.remote_share_view_container_full);
         mChannelText = findViewById(R.id.channel_text);
 
         mCallBtn  = findViewById(R.id.btn_call);
         mMuteBtn  = findViewById(R.id.btn_mute);
-        mDebugBtn = findViewById(R.id.btn_debug);
         mShowCameraBtn = findViewById(R.id.btn_show_camera);
         mLogView = findViewById(R.id.log_recycler_view);
 
@@ -85,8 +88,8 @@ public class VideoChatViewActivity extends AppCompatActivity {
         //mLogView.logW("You will see custom logs here");
         //mLogView.logE("You can also use this to show errors");
 
-        // Initialize call state.
-        setCallState(false);
+        // Initialize the UI state.
+        setUIState(UIState.DISCONNECTED);
 
         // Ask for permissions at runtime.
         // This is just an example set of permissions. Other permissions
@@ -101,7 +104,7 @@ public class VideoChatViewActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (mIsCallActive) {
+        if (mUIState != UIState.DISCONNECTED) {
             mRtcEngine.leaveChannel();
         }
         RtcEngine.destroy();
@@ -153,19 +156,18 @@ public class VideoChatViewActivity extends AppCompatActivity {
         public void onFirstRemoteVideoDecoded(final int uid, int width, int height, int elapsed) {
             Log.w("OMEN","onFirstRemoteVideoDecoded, uid: " + (uid & 0xFFFFFFFFL));
 
-            // Render into either the main view or the smaller PIP view depending on the uid.
-            // Uid = 10000 is reserved for the window share, which renders in the main view.
-            if (uid == WINDOW_SHARE_UID) {
-                //isRemoteShareRendered = true
-            } else {
+            // Can only render one remote camera in this app, so capture its uid.
+            if (uid != WINDOW_SHARE_UID && mRemoteCameraUid == 0) {
                 mRemoteCameraUid = uid;
-                //isRemoteCameraRendered = true
             }
+
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
+                    // Render into either the main view or the smaller PIP view depending on the uid.
+                    // Uid = 10000 is reserved for the window share, which renders in the main view.
                     mLogView.logI("Remote video starting, uid: " + (uid & 0xFFFFFFFFL));
-                    setupRemoteVideo(uid);
+                    setupRemoteVideo(uid, uid == WINDOW_SHARE_UID ? mRemoteShareContainerSplit : mRemoteCameraContainer);
                 }
             });
         }
@@ -189,32 +191,33 @@ public class VideoChatViewActivity extends AppCompatActivity {
 
     ////////////////////////////// UI triggered events /////////////////////////////////////////////
 
+    // Mute/unmute the microphone
     public void onLocalAudioMuteClicked(View view) {
         // Toggle audio mute.
         setAudioState(!mMuted);
     }
 
+    // Hide/show the remote camera.
     public void onShowCameraClicked(View view) {
-        mShowRemoteCamera = !mShowRemoteCamera;
-        int visibility = mRemoteCameraContainer.getVisibility();
-
-        if (mShowRemoteCamera) {
-            mRemoteCameraContainer.setVisibility(View.VISIBLE);
-            mShowCameraBtn.setImageResource(R.drawable.btn_camera_show);
+        if (mUIState == UIState.CONNECTED_FULLSCREEN) {
+            // Toggle to split screen while showing remote camera
             if (mRemoteCameraUid != 0)
-                setupRemoteVideo(mRemoteCameraUid);
-        } else {
-            mRemoteCameraContainer.setVisibility(View.GONE);
-            mShowCameraBtn.setImageResource(R.drawable.btn_camera_hide);
+                setupRemoteVideo(mRemoteCameraUid, mRemoteCameraContainer);
+            removeRemoteShare();
+            setupRemoteVideo(WINDOW_SHARE_UID, mRemoteShareContainerSplit);
+            setUIState(UIState.CONNECTED_SPLITSCREEN);
+        } else if (mUIState == UIState.CONNECTED_SPLITSCREEN) {
+            // Toggle to full screen while hiding remote camera
             removeRemoteCamera();
+            removeRemoteShare();
+            setupRemoteVideo(WINDOW_SHARE_UID, mRemoteShareContainerFull);
+            setUIState(UIState.CONNECTED_FULLSCREEN);
         }
-        //mRemoteCameraContainer.setVisibility(visibility == View.VISIBLE ? View.GONE : View.VISIBLE);
-        //int res = mShowRemoteCamera ? R.drawable.btn_camera_show : R.drawable.btn_camera_hide;
-        //mShowCameraBtn.setImageResource(res);
     }
 
+    // Either join or leave the channel.
     public void onCallClicked(View view) {
-        if (!mIsCallActive) {
+        if (mUIState == UIState.DISCONNECTED) {
             // Prior to joining the channel, ensure audio is muted.
            setAudioState(true);
 
@@ -223,17 +226,20 @@ public class VideoChatViewActivity extends AppCompatActivity {
             if (TextUtils.isEmpty(token) || TextUtils.equals(token, "#YOUR ACCESS TOKEN#")) {
                 token = null; // default, no token
             }
-            mRtcEngine.joinChannel(token, mChannelText.getEditableText().toString(), "Extra Optional Data", 0); // OCCTEST203
+            mRtcEngine.joinChannel(token, mChannelText.getEditableText().toString(), "Extra Optional Data", 0);
+            setUIState(UIState.CONNECTED_SPLITSCREEN);
         } else {
             // Leave the channel.
+            mRemoteCameraUid = 0;
             removeRemoteCamera();
             removeRemoteShare();
             mRtcEngine.leaveChannel();
             mLogView.logI("Left channel");
+            setUIState(UIState.DISCONNECTED);
         }
-        setCallState(!mIsCallActive);
     }
 
+    // Show/hide the debug output.
     public void onDebugButtonClicked(View view) {
         mEnableDebug = !mEnableDebug;
         mLogView.setVisibility(mEnableDebug ? View.VISIBLE : View.GONE);
@@ -306,12 +312,9 @@ public class VideoChatViewActivity extends AppCompatActivity {
         }
     }
 
-    private void setupRemoteVideo(int uid) {
-        ViewGroup remoteContainer = uid == WINDOW_SHARE_UID ? mRemoteShareContainer : mRemoteCameraContainer;
-
-        // Only one remote video view is available for this
-        // app. Here we check if there exists a surface
-        // view tagged as this uid.
+    private void setupRemoteVideo(int uid, ViewGroup remoteContainer) {
+        // Only one remote video view is available for this app.
+        // Here we check if there exists a surface view tagged as this uid.
         int count = remoteContainer.getChildCount();
         View view = null;
         for (int i = 0; i < count; i++) {
@@ -320,11 +323,11 @@ public class VideoChatViewActivity extends AppCompatActivity {
                 view = v;
             }
         }
-
         if (view != null) {
             return;
         }
 
+        // Checks have passed so set up the remote video.
         int renderMode;
         SurfaceView remoteView = RtcEngine.CreateRendererView(getBaseContext());
         if (uid == WINDOW_SHARE_UID) {
@@ -349,7 +352,9 @@ public class VideoChatViewActivity extends AppCompatActivity {
 
     private void removeRemoteShare() {
         if (mRemoteShareView != null) {
-            mRemoteShareContainer.removeView(mRemoteShareView);
+            // Try to remove from both share containers but in reality only one will contain the view.
+            mRemoteShareContainerSplit.removeView(mRemoteShareView);
+            mRemoteShareContainerFull.removeView(mRemoteShareView);
             mRemoteShareView = null;
         }
     }
@@ -363,23 +368,42 @@ public class VideoChatViewActivity extends AppCompatActivity {
         });
     }
 
-    private void setCallState(boolean isCallActive) {
-        int visibility;
-        mIsCallActive = isCallActive;
-        if (mIsCallActive) {
-            visibility = View.VISIBLE;
-            mCallBtn.setImageResource(R.drawable.btn_endcall);
-            mShowRemoteCamera = true;
-            mShowCameraBtn.setImageResource(R.drawable.btn_camera_show);
-        } else {
-            visibility = View.GONE;
-            mCallBtn.setImageResource(R.drawable.btn_startcall);
-        }
+    // The UI is in one of 3 states:
+    // (1) DISCONNECTED: only join button is displayed
+    // (2) CONNECTED_FULLSCREEN: connected with share in full screen
+    // (3) CONNECTED_SPLITSCREEN: connected with share and camera in split screen
+    private void setUIState(UIState state) {
+        mUIState = state;
 
-        // Show/hide the buttons depending on whether you are connected to a channel.
-        mMuteBtn.setVisibility(visibility);
-        mShowCameraBtn.setVisibility(visibility);
-        mRemoteCameraContainer.setVisibility(visibility);
-        mChannelText.setEnabled(!mIsCallActive);
+        if (mUIState == UIState.DISCONNECTED) {
+            // Not connected to a channel.
+            mCallBtn.setImageResource(R.drawable.btn_startcall);
+            mRemoteShareContainerSplit.setVisibility(View.GONE);
+            mRemoteCameraContainer.setVisibility(View.GONE);
+            mChannelText.setEnabled(true);
+
+            // Hide the buttons
+            mMuteBtn.setVisibility(View.GONE);
+            mShowCameraBtn.setVisibility(View.GONE);
+        } else {
+            // Connected to a channel.
+            mCallBtn.setImageResource(R.drawable.btn_endcall);
+            mShowCameraBtn.setImageResource(R.drawable.btn_camera_show);
+            mChannelText.setEnabled(false);
+
+            // Show the buttons
+            mMuteBtn.setVisibility(View.VISIBLE);
+            mShowCameraBtn.setVisibility(View.VISIBLE);
+
+            if (mUIState == UIState.CONNECTED_SPLITSCREEN) {
+                mRemoteShareContainerSplit.setVisibility(View.VISIBLE);
+                mRemoteCameraContainer.setVisibility(View.VISIBLE);
+                mShowCameraBtn.setImageResource(R.drawable.btn_camera_show);
+            } else {
+                mRemoteShareContainerSplit.setVisibility(View.GONE);
+                mRemoteCameraContainer.setVisibility(View.GONE);
+                mShowCameraBtn.setImageResource(R.drawable.btn_camera_hide);
+            }
+        }
     }
 }

@@ -7,7 +7,7 @@
     tools:context="io.agora.hpomenaudience.VideoChatViewActivity">
 
     <RelativeLayout
-        android:id="@+id/remote_share_view_container"
+        android:id="@+id/remote_share_view_container_full"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@color/remoteBackground">
@@ -30,6 +30,14 @@
                 android:src="@drawable/icon_omen_largest"/>
         </RelativeLayout>
         <RelativeLayout
+            android:id="@+id/remote_share_view_container_split"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_marginRight="@dimen/remote_camera_width"
+            android:visibility="gone"
+            android:background="@color/remoteBackground">
+        </RelativeLayout>
+        <RelativeLayout
             android:id="@+id/icon_padding"
             android:layout_width="match_parent"
             android:layout_height="@dimen/remote_back_icon_margin_bottom"
@@ -38,14 +46,14 @@
 
     <FrameLayout
         android:id="@+id/remote_camera_view_container"
-        android:layout_width="@dimen/local_preview_width"
-        android:layout_height="@dimen/local_preview_height"
+        android:layout_width="@dimen/remote_camera_width"
+        android:layout_height="@dimen/remote_camera_height"
         android:layout_alignParentEnd="true"
         android:layout_alignParentRight="true"
-        android:layout_alignParentTop="true"
-        android:layout_marginEnd="@dimen/local_preview_margin_right"
-        android:layout_marginRight="@dimen/local_preview_margin_right"
-        android:layout_marginTop="@dimen/local_preview_margin_top"
+
+        android:layout_marginEnd="0dp"
+        android:layout_marginRight="0dp"
+        android:layout_centerVertical="true"
         android:background="@color/localBackground">
 
         <ImageView
